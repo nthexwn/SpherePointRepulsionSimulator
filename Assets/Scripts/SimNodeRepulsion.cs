@@ -7,7 +7,7 @@ public class SimNodeRepulsion : MonoBehaviour
     public GameObject prefab;
 
     private const int NODE_COUNT = 100;
-    private const float FORCE_DAMPENING = 100f;
+    private const float FORCE_DAMPENING = NODE_COUNT * 2;
 
     // If all nodes have positioned themselves to be at least this far apart from each other then we can accept the
     // solution and end the simulation.
@@ -16,7 +16,7 @@ public class SimNodeRepulsion : MonoBehaviour
 
     // If all nodes have moved less than this amount on any given update then we consider the simulation to have
     // converged.
-    private const float CONVERGE_ANGLE_MOVED = 0.0001f;
+    private const float CONVERGE_ANGLE_MOVED = 0.00001f;
 
     private GameObject[] nodes;
     private float[,] forces;
@@ -124,7 +124,7 @@ public class SimNodeRepulsion : MonoBehaviour
 
         // We're going to brute force the repulsion simulation by calculating the proximity of every node to every
         // other node (O(n^2)).
-        forces = new float[NODE_COUNT, 2];
+        forces = new float[NODE_COUNT, 3];
         for (int i = 0; i < NODE_COUNT; i++)
         {
             CalcForce(i, ref minAngleDetected);
@@ -141,20 +141,21 @@ public class SimNodeRepulsion : MonoBehaviour
     private void CalcForce(int i, ref float minAngleDetected)
     {
         SphereCoords sphereCoords = new SphereCoords(nodes[i].transform.position);
-        float latForceTotal = 0f;
-        float longForceTotal = 0f;
+        float xForceTotal = 0f;
+        float yForceTotal = 0f;
+        float zForceTotal = 0f;
         for (int j = 0; j < NODE_COUNT; j++)
         {
-            CalcForceOther(sphereCoords, i, j, ref minAngleDetected, ref latForceTotal, ref longForceTotal);
+            CalcForceOther(sphereCoords, i, j, ref minAngleDetected,
+                           ref xForceTotal, ref yForceTotal, ref zForceTotal);
             if (simulationEnded)
             {
                 goto done;
             }
         }
-
-        // Don't allow forces that would move the node further than the other side of the sphere.
-        forces[i, 0] = Mathf.Clamp(latForceTotal, -Mathf.PI, Mathf.PI);
-        forces[i, 1] = Mathf.Clamp(longForceTotal, -Mathf.PI, Mathf.PI);
+        forces[i, 0] = xForceTotal;
+        forces[i, 1] = yForceTotal;
+        forces[i, 2] = zForceTotal;
 
     done:
         return;
@@ -163,7 +164,7 @@ public class SimNodeRepulsion : MonoBehaviour
     // We could make this function signature less ugly by giving it a Tuple return type.  Alas Unity still doesn't
     // support C# 7+ so we can't do that here.
     private void CalcForceOther(SphereCoords sphereCoordsI, int i, int j, ref float minAngleDetected,
-                                ref float latForceTotal, ref float longForceTotal)
+                                ref float xForceTotal, ref float yForceTotal, ref float zForceTotal)
     {
         if (i == j)
         {
@@ -184,41 +185,25 @@ public class SimNodeRepulsion : MonoBehaviour
             minAngleDetected = angleDetected;
         }
 
-        // Determine force based on inverse squared angle and split it into lateral and longitudinal components.
-        float force = 1f / (FORCE_DAMPENING * Mathf.Pow(angleDetected, Mathf.PI));
-        SphereCoords sphereCoordsJ = new SphereCoords(nodes[j].transform.position);
-        float latDiff = Mathf.Abs(sphereCoordsJ.latitude - sphereCoordsI.latitude);
-        float longDiff = Mathf.Abs(sphereCoordsJ.longitude - sphereCoordsI.longitude);
-
-        // Adjust for different hemispheres
-        float longHemiAdjustment = longDiff > Mathf.PI ? -1f : 1f;
-        longDiff = longDiff > Mathf.PI ? 2 * Mathf.PI - longDiff : longDiff;
-        float latHemiAdjustment = LatHemiAdjustment(longDiff, sphereCoordsI.latitude, sphereCoordsJ.latitude);
-
-        float latMultiplier = Mathf.Pow(Mathf.PI / (Mathf.PI - Mathf.Abs(sphereCoordsI.latitude - Mathf.PI / 2f)), Mathf.PI);
-        float latForce = force * Time.deltaTime * latDiff / (latDiff * latMultiplier + longDiff) * latHemiAdjustment;
-        latForce *= sphereCoordsI.latitude > sphereCoordsJ.latitude ? 1f : -1f;
-        float longForce = force * Time.deltaTime * longDiff / (latDiff * latMultiplier + longDiff) * longHemiAdjustment;
-        longForce *= (sphereCoordsI.longitude > sphereCoordsJ.longitude ? 1f : -1f);
-        latForceTotal += latForce;
-        longForceTotal += longForce;
+        // Determine force based on inverse squared angle and split it into directional components.
+        float force = 1f / (FORCE_DAMPENING * Mathf.Pow(angleDetected, 2));
+        Vector3 diffs = nodes[i].transform.position - nodes[j].transform.position;
+        float diffSum = (Mathf.Abs(diffs.x) + Mathf.Abs(diffs.y) + Mathf.Abs(diffs.z));
+        float ratioX = Mathf.Abs(diffs.x) / diffSum;
+        float ratioY = Mathf.Abs(diffs.y) / diffSum;
+        float ratioZ = Mathf.Abs(diffs.z) / diffSum;
+        float directionX = nodes[i].transform.position.x > nodes[j].transform.position.x ? 1 : -1;
+        float directionY = nodes[i].transform.position.y > nodes[j].transform.position.y ? 1 : -1;
+        float directionZ = nodes[i].transform.position.z > nodes[j].transform.position.z ? 1 : -1;
+        float forceX = force * ratioX * directionX;
+        float forceY = force * ratioY * directionY;
+        float forceZ = force * ratioZ * directionZ;
+        xForceTotal += forceX;
+        yForceTotal += forceY;
+        zForceTotal += forceZ;
 
     done:
         return;
-    }
-
-    // We can't just move up or down in latitude relative to the other node without taking the longitude into account
-    // as well.  Otherwise we'd end up in situations where moving the nodes farther apart in latitude actually brings
-    // them closer together (IE: if they're near a pole on opposite sides).  This function determines a directional
-    // adjustment multiplier to compensate for these scenarios.
-    private float LatHemiAdjustment(float longDiff, float selfLat, float otherLat)
-    {
-        float adjustment = 1f;
-        if (longDiff > Mathf.PI / 2f && Mathf.Abs(selfLat - Mathf.PI / 2f) > Mathf.Abs(otherLat - Mathf.PI / 2f))
-        {
-            adjustment = -1f;
-        }
-        return adjustment;
     }
 
     private bool SolutionFound(float minAngleDetected)
@@ -258,29 +243,43 @@ public class SimNodeRepulsion : MonoBehaviour
 
     private void MoveNode(int i, float minAngleDetected)
     {
+        // Determine where the given forces will place the node, then normalize the vector so it still gets placed on
+        // the sphere's surface.
         SphereCoords currentSpherical = new SphereCoords(nodes[i].transform.position);
-        SphereCoords plannedSpherical = new SphereCoords(nodes[i].transform.position);
-        plannedSpherical.latitude += forces[i, 0];
-        plannedSpherical.longitude += forces[i, 1];
+        Vector3 currentCartesian = nodes[i].transform.position;
+        Vector3 plannedForces = new Vector3(forces[i, 0], forces[i, 1], forces[i, 2]);
+        Vector3 plannedCartesian = currentCartesian + plannedForces;
+        SphereCoords plannedSpherical = new SphereCoords(plannedCartesian);
+        float normalizeRatio = currentSpherical.radius / plannedSpherical.radius;
+        plannedCartesian *= normalizeRatio;
+        plannedSpherical.radius *= normalizeRatio;
 
         // We don't want nodes to run into each other, so we're only going to allow them to move 1/3rd of the smallest
         // detected angle between any two nodes.  This means that even if the two closest nodes are moving directly
         // towards each other there will still be some space left between them afterwards.  If the total forces on the
-        // node would cause it to move further than this then we'll clamp both the lateral and longitudinal forces
-        // acting on that node such that the resulting movement angle is equal to the maximum that we just set.
+        // node would cause it to move further than this then we'll clamp them such that the resulting movement angle
+        // is equal to the maximum that we just set.
         float maxAngleAllowed = minAngleDetected / 3f;
         float anglePlanned = currentSpherical.AngleBetween(plannedSpherical);
         float clampRatio = anglePlanned > maxAngleAllowed ? maxAngleAllowed / anglePlanned : 1f;
+        if(clampRatio < 1f)
+        {
+            // Now we get to do this again with the reduced force.
+            plannedForces *= clampRatio;
+            plannedCartesian = currentCartesian + plannedForces;
+            plannedSpherical = new SphereCoords(plannedCartesian);
+            normalizeRatio = currentSpherical.radius / plannedSpherical.radius;
+            plannedCartesian *= normalizeRatio;
+        }
 
-        // Is it still moving?
+        // Move it!
+        nodes[i].transform.position = plannedCartesian;
+
+        // Did it move a meaningful amount?
         if (anglePlanned > CONVERGE_ANGLE_MOVED * clampRatio)
         {
             simulationConverged = false;
         }
-
-        plannedSpherical.latitude = currentSpherical.latitude + forces[i, 0] * clampRatio;
-        plannedSpherical.longitude = currentSpherical.longitude + forces[i, 1] * clampRatio;
-        nodes[i].transform.position = plannedSpherical.ToCartesian();
     }
 
     // Leftover from an earlier attempt to render the nodes as pixels on a canvas applied to the sphere as a material.
