@@ -6,28 +6,28 @@ public class SimNodeRepulsion : MonoBehaviour
 {
     public GameObject prefab;
 
-    private const int NODE_COUNT = 100;
-    private const float FORCE_DAMPENING = NODE_COUNT * 2;
+    private const int NODE_COUNT = 6;
+    private const float FORCE_DAMPENING = NODE_COUNT * 5;
 
     // If all nodes have positioned themselves to be at least this far apart from each other then we can accept the
     // solution and end the simulation.
-    //private const float CONVERGE_ANGLE_ALLOWED = 0.0717f;
-    private const float CONVERGE_ANGLE_ALLOWED = Mathf.PI;
+    private const float CONVERGE_ANGLE_ALLOWED = 0.0717f;
 
     // If all nodes have moved less than this amount on any given update then we consider the simulation to have
     // converged.
-    private const float CONVERGE_ANGLE_MOVED = 0.00001f;
+    private const float CONVERGE_ANGLE_MOVED = 0.0001f;
 
     private GameObject[] nodes;
     private float[,] forces;
+    private float minAngleGlobal = Mathf.PI;
     private bool simulationConverged = false;
     private bool simulationEnded = false;
 
     private void Start()
     {
         PlaceNodes();
-        print(string.Format("{0} nodes have been randomly distributed on the sphere.  Repulsion simulation is now " +
-                            "in progress...", NODE_COUNT));
+        TextHandler.Print(string.Format("{0} nodes have been randomly distributed on the sphere.  Repulsion " +
+                                        "simulation is now in progress...", NODE_COUNT));
     }
 
     private void PlaceNodes()
@@ -94,19 +94,26 @@ public class SimNodeRepulsion : MonoBehaviour
             goto done;
         }
 
-        if (SolutionFound(minAngleDetected))
+        if (minAngleDetected < minAngleGlobal)
         {
-            print(string.Format("Solution found!  {0} nodes have positioned themselves at least {1} radians apart:",
-                                NODE_COUNT, minAngleDetected));
-            PrintNodes();
-            simulationEnded = true;
-            goto done;
+            minAngleGlobal = minAngleDetected;
+            if (SolutionFound(minAngleGlobal))
+            {
+                TextHandler.Print("\nSolution found!");
+                PrintNodes();
+                simulationEnded = true;
+                goto done;
+            }
+            else {
+                TextHandler.Print("\nNew record!");
+                PrintNodes();
+            }
         }
 
         if (simulationConverged)
         {
-            print(string.Format("Solution rejected!  {0} nodes have converged, but are only at least {1} radians " +
-                    "apart.", NODE_COUNT, minAngleDetected));
+            TextHandler.Print(string.Format("Solution rejected!  {0} nodes have converged, but are only at least " +
+                    "{1} radians apart.", NODE_COUNT, minAngleDetected));
             simulationEnded = true;
             goto done;
         }
@@ -120,7 +127,7 @@ public class SimNodeRepulsion : MonoBehaviour
     private float CalcForces()
     {
         // Initialize minimum detected angle between any two nodes with largest possible value.
-        float minAngleDetected = 2f * Mathf.PI;
+        float minAngleDetected = Mathf.PI;
 
         // We're going to brute force the repulsion simulation by calculating the proximity of every node to every
         // other node (O(n^2)).
@@ -176,7 +183,8 @@ public class SimNodeRepulsion : MonoBehaviour
                                                         nodes[j].transform.position, sphereCoordsI.radius);
         if (angleDetected == 0f)
         {
-            print(string.Format("Oops, node{0} collided with node{1}.  Time for the universe to explode!", i, j));
+            TextHandler.Print(string.Format("Oops, node{0} collided with node{1}.  Time for the universe to explode!",
+                                            i, j));
             simulationEnded = true;
             goto done;
         }
@@ -206,13 +214,15 @@ public class SimNodeRepulsion : MonoBehaviour
         return;
     }
 
-    private bool SolutionFound(float minAngleDetected)
+    private bool SolutionFound(float minAngle)
     {
-        return minAngleDetected > CONVERGE_ANGLE_ALLOWED;
+        return minAngle > CONVERGE_ANGLE_ALLOWED;
     }
 
     private void PrintNodes()
     {
+        TextHandler.Print(string.Format("{0} nodes have positioned themselves at least {1} radians apart:",
+                    NODE_COUNT, minAngleGlobal));
         for (int i = 0; i < NODE_COUNT; i++)
         {
             SphereCoords sphereCoords = new SphereCoords(nodes[i].transform.position);
@@ -223,10 +233,16 @@ public class SimNodeRepulsion : MonoBehaviour
             float longRads = sphereCoords.longitude;
             float latDegs = latRads * 180f / Mathf.PI;
             float longDegs = longRads * 180f / Mathf.PI;
-            print(string.Format("x:{0:0.####} y:{1:0.####} z:{2:0.####} " +
-                                "latRads:{3:0.####} longRads:{4:0.####} " +
-                                "latDegs:{5:0.####}° longDegs:{6:0.####}° ",
-                                x, y, z, latRads, longRads, latDegs, longDegs));
+            string padX = string.Format("x:{0}{1:0.000}", x > 0f ? " " : "", x);
+            string padY = string.Format("y:{0}{1:0.000}", y > 0f ? " " : "", y);
+            string padZ = string.Format("z:{0}{1:0.000}", z > 0f ? " " : "", z);
+            string padLatRads = string.Format("latRads:{0}{1:0.0000}", latRads > 0f ? " " : "", latRads);
+            string padLongRads = string.Format("longRads:{0}{1:0.0000}", longRads > 0f ? " " : "", longRads);
+            string padLatDegs = string.Format("latDegs:{0}{1:000.00}", latDegs > 0f ? " " : "", latDegs);
+            string padLongDegs = string.Format("longDegs:{0}{1:000.00}", longDegs > 0f ? " " : "", longDegs);
+            string str = string.Format("{0} {1} {2} {3} {4} {5} {6}", padX, padY, padZ, padLatRads, padLongRads,
+                                       padLatDegs, padLongDegs);
+            TextHandler.Print(str);
         }
     }
 
