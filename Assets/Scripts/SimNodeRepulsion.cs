@@ -6,7 +6,7 @@ public class SimNodeRepulsion : MonoBehaviour
 {
     public GameObject prefab;
 
-    private const int NODE_COUNT = 6;
+    private const int NODE_COUNT = 2000;
     private const float FORCE_DAMPENING = NODE_COUNT * 5;
 
     // If all nodes have positioned themselves to be at least this far apart from each other then we can accept the
@@ -17,14 +17,21 @@ public class SimNodeRepulsion : MonoBehaviour
     // converged.
     private const float CONVERGE_ANGLE_MOVED = 0.0001f;
 
+    // Variables for node placement algorithms
+    private const float INTERVAL_DEGS = 0.1f;
+    private const float REQUIRED_SEPARATION_DEGS = 4.1f;
+
     private GameObject[] nodes;
+    private List<GameObject> nodeList;
     private float[,] forces;
     private float minAngleGlobal = Mathf.PI;
     private bool simulationConverged = false;
     private bool simulationEnded = false;
+    private int nodeCount = 0;
 
     private void Start()
     {
+        nodeList = new List<GameObject>();
         PlaceNodes();
         TextHandler.Print(string.Format("{0} nodes have been randomly distributed on the sphere.  Repulsion " +
                                         "simulation is now in progress...", NODE_COUNT));
@@ -35,11 +42,51 @@ public class SimNodeRepulsion : MonoBehaviour
         // Get sphere radius from parent object.  Assume size won't change size.
         float radius = transform.localScale.x / 2f;
 
+        /*
         nodes = new GameObject[NODE_COUNT];
         for (int i = 0; i < NODE_COUNT; i++)
         {
             PlaceNode(i, radius);
         }
+        */
+
+        float latitude = -90.0f;
+        while (latitude < 90.0f)
+        {
+            float longitude = 0.0f;
+            while (longitude < 360.0f)
+            {
+                Vector3 target = new Vector3(latitude * -1.0f, longitude);
+                GameObject node = Instantiate(prefab, Vector3.zero, Quaternion.identity);
+                node.transform.eulerAngles = target;
+                node.transform.Translate(Vector3.forward * radius);
+                if (CanPlaceNode(node, radius))
+                {
+                    nodeList.Add(node);
+                    nodeCount++;
+                    print(string.Format("node{0}: {1}{2} {3}{4}", nodeCount, longitude > 180 ? 360 - longitude : longitude, longitude > 180 ? 'W' : 'E', latitude, latitude < 0 ? 'S' : 'N'));
+                } else {
+                    Destroy(node);
+                }
+                longitude += INTERVAL_DEGS;
+            }
+            latitude += INTERVAL_DEGS;
+        }
+    }
+
+    private bool CanPlaceNode(GameObject target, float radius)
+    {
+        bool can = true;
+        foreach (GameObject other in nodeList)
+        {
+            float arcDistance = Mathf.Acos(Vector3.Dot(other.transform.position.normalized, target.transform.position.normalized));
+            if (arcDistance < REQUIRED_SEPARATION_DEGS * Mathf.Deg2Rad)
+            {
+                can = false;
+                break;
+            }
+        }
+        return can;
     }
 
     private void PlaceNode(int i, float radius)
@@ -78,7 +125,7 @@ public class SimNodeRepulsion : MonoBehaviour
 
     private void Update()
     {
-        SimNodes();
+        //SimNodes();
     }
 
     void SimNodes()
