@@ -4,15 +4,15 @@ using UnityEngine;
 
 public class CameraControls : MonoBehaviour
 {
-    public float mouseSensitivity = 100;
-    public float keyboardSensitivity = 1;
+    public float mouseSensitivity = 400;
+    public float keyboardSensitivity = 4;
 
-    private float startRotationX = 0f;
-    private float startRotationY = 90f;
+    private float startRotationX = 25f;
+    private float startRotationY = 0f;
     private float startRotationZ = 0f;
-    private float startPositionX = -2f;
-    private float startPositionY = 0f;
-    private float startPositionZ = 0f;
+    private float startPositionX = 0f;
+    private float startPositionY = 1f;
+    private float startPositionZ = -2f;
 
     private float rotationX;
     private float rotationY;
