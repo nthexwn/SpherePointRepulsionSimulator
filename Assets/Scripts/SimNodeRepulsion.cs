@@ -8,7 +8,7 @@ public class SimNodeRepulsion : MonoBehaviour
     private TextHandler log;
     private const string logPath = "Assets/Resources/log.txt";
 
-    private const int NODE_COUNT = 1000;
+    private const int NODE_COUNT = 10000;
     private const float FORCE_DAMPENING = NODE_COUNT * 3.6f;
     private const float COLLISION_THRESHOLD = 0.0001f;
 
@@ -21,14 +21,13 @@ public class SimNodeRepulsion : MonoBehaviour
     private const float CONVERGE_ANGLE_MOVED = -1f;
 
     // Variables for node placement algorithms
-    private const float INTERVAL_DEGS = 10.0f;
+    private const int INTERVAL_MINUTES = 1;
     private const float REQUIRED_SEPARATION_DEGS = 4.1f;
+    private const int MAX_NEIGHBOR_CHECKS = 200;
 
     private float radius;
     private GameObject[] nodes;
-    private List<GameObject> nodeList;
     private Quaternion[] rotations;
-    private float[,] forces;
     private float minAngleGlobal;
     private float minAngleFound;
     private bool simulationConverged;
@@ -43,14 +42,15 @@ public class SimNodeRepulsion : MonoBehaviour
     private void Start()
     {
         InitVars();
-        PlaceNodes();
+        //PlaceNodesRandom();
+        //PlaceNodesBruteForce();
+        PlaceNodesGoldenSpiral();
     }
 
     private void InitVars()
     {
         log = new TextHandler(logPath);
         nodes = new GameObject[NODE_COUNT];
-        nodeList = new List<GameObject>();
         rotations = new Quaternion[NODE_COUNT];
 
         // Get sphere radius from attached object.  Assume size won't change size.
@@ -69,79 +69,169 @@ public class SimNodeRepulsion : MonoBehaviour
         stupidCounter = 0;
     }
 
-    private void PlaceNodes()
-    {
-        /*
-        for (int i = 0; i < NODE_COUNT; i++)
-        {
-            PlaceNode(i);
-        }
-        */
-
-        float latitude = -90.0f;
-        while (latitude < 90.0f)
-        {
-            float longitude = 0.0f;
-            while (longitude < 360.0f)
-            {
-                Vector3 target = new Vector3(latitude * -1.0f, longitude);
-                GameObject node = Instantiate(prefab, Vector3.zero, Quaternion.identity);
-                node.transform.eulerAngles = target;
-                node.transform.Translate(Vector3.forward * radius);
-                if (CanPlaceNode(node, radius))
-                {
-                    nodeList.Add(node);
-                    nodeCount++;
-                    log.Print(string.Format("node{0}: {1}{2} {3}{4}\n", nodeCount, longitude > 180 ? 360 - longitude : longitude, longitude > 180 ? 'W' : 'E', latitude, latitude < 0 ? 'S' : 'N'));
-                } else {
-                    Destroy(node);
-                }
-                longitude += INTERVAL_DEGS;
-            }
-            latitude += INTERVAL_DEGS;
-        }
-    }
-
-    private bool CanPlaceNode(GameObject target, float radius)
+    private bool CanPlaceNode(Vector3 point)
     {
         bool can = true;
-        foreach (GameObject other in nodeList)
+
+        if (nodeCount == 0)
         {
-            float arcDistance = Mathf.Acos(Vector3.Dot(other.transform.position.normalized, target.transform.position.normalized));
+            goto done;
+        }
+
+        int checkLimit = nodeCount < MAX_NEIGHBOR_CHECKS ? 0 : nodeCount - MAX_NEIGHBOR_CHECKS;
+        for (int index = nodeCount - 1; index >= checkLimit; index--)
+        {
+            GameObject other = nodes[index];
+            float arcDistance = Mathf.Acos(Vector3.Dot(other.transform.position.normalized, point.normalized));
             if (arcDistance < REQUIRED_SEPARATION_DEGS * Mathf.Deg2Rad)
             {
                 can = false;
-                break;
+                goto done;
             }
         }
+
+    done:
         return can;
     }
 
-    private void PlaceNode(int i)
+    private Vector3 RoundToNearestMinute(Vector3 point)
     {
-        Vector3 random = Vector3.zero;
-        Quaternion rotation = Quaternion.identity;
+        // Get current values
+        point = point.normalized;
+        float latitude_rads = Mathf.Asin(point.y);
+        float latitude_degs = latitude_rads * Mathf.Rad2Deg;
+        float longitude_rads = Mathf.Atan2(point.x, point.z);
+        float longitude_degs = longitude_rads * Mathf.Rad2Deg;
 
-        // Keep re-creating the node until it doesn't collide with any other nodes.
-        bool collided = true;
-        while (collided)
+        // Round to minutes
+        latitude_degs = Mathf.RoundToInt(latitude_degs * 60.0f) / 60.0f;
+        latitude_rads = latitude_degs * Mathf.Deg2Rad;
+        longitude_degs = Mathf.RoundToInt(longitude_degs * 60.0f) / 60.0f;
+        longitude_rads = longitude_degs * Mathf.Deg2Rad;
+
+        // Convert back to point
+        float equatorX = Mathf.Cos(longitude_rads);
+        float equatorZ = Mathf.Sin(longitude_rads);
+        float multiplier = Mathf.Cos(latitude_rads);
+        point.x = multiplier * equatorX * radius;
+        point.z = multiplier * equatorZ * radius;
+        point.y = Mathf.Sin(latitude_rads) * radius;
+        return point;
+    }
+
+    private void PrintPoint(Vector3 point)
+    {
+        // Get current values
+        point = point.normalized;
+        float latitude_rads = Mathf.Asin(point.y);
+        float latitude_degs = latitude_rads * Mathf.Rad2Deg;
+        float longitude_rads = Mathf.Atan2(point.x, point.z);
+        float longitude_degs = longitude_rads * Mathf.Rad2Deg;
+        log.Print(string.Format("node{0}: {1:0.00}{2} {3:0.00}{4}\n",
+                        nodeCount,
+                        longitude_degs > 180 ? 360 - longitude_degs : longitude_degs,
+                        longitude_degs > 180 ? 'W' : 'E',
+                        latitude_degs < 0 ? latitude_degs * -1.0f : latitude_degs,
+                        latitude_degs < 0 ? 'S' : 'N'));
+    }
+
+    private void PlaceNodesRandom()
+    {
+        for (int i = 0; i < NODE_COUNT; i++)
         {
-            collided = false;
-            random = Random.onUnitSphere;
-            rotation = Quaternion.FromToRotation(Vector3.forward, random);
+            Vector3 random = Vector3.zero;
+            Quaternion rotation = Quaternion.identity;
 
-            // Check for collisions with other nodes
-            for (int j = 0; j < i; j++)
+            // Keep re-creating the node until it doesn't collide with any other nodes.
+            bool collided = true;
+            while (collided)
             {
-                if (Quaternion.Angle(rotation, nodes[j].transform.rotation) < COLLISION_THRESHOLD)
+                collided = false;
+                random = Random.onUnitSphere;
+                rotation = Quaternion.FromToRotation(Vector3.forward, random);
+
+                // Check for collisions with other nodes
+                for (int j = 0; j < i; j++)
                 {
-                    collided = true;
-                    break;
+                    if (Quaternion.Angle(rotation, nodes[j].transform.rotation) < COLLISION_THRESHOLD)
+                    {
+                        collided = true;
+                        break;
+                    }
                 }
             }
+            nodes[i] = Instantiate(prefab, random, rotation) as GameObject;
+            nodes[i].name = string.Format("Node{0}", i);
         }
-        nodes[i] = Instantiate(prefab, random, rotation) as GameObject;
-        nodes[i].name = string.Format("Node{0}", i);
+    }
+
+    private void PlaceNodesBruteForce()
+    {
+        int latitude_mins, longitude_mins;
+        float latitude_degs, latitude_rads, longitude_degs, longitude_rads, equatorX, equatorZ, multiplier;
+        Vector3 point = new(0, 0, 0);
+        Vector3 target = new(0, 0);
+
+        latitude_mins = -5400;
+        while (latitude_mins < 5400)
+        {
+            latitude_degs = latitude_mins / 60.0f;
+            latitude_rads = latitude_degs * Mathf.Deg2Rad;
+            longitude_mins = 0;
+            while (longitude_mins < 21600)
+            {
+                longitude_degs = longitude_mins / 60.0f;
+                longitude_rads = longitude_degs * Mathf.Deg2Rad;
+                equatorX = Mathf.Cos(longitude_rads);
+                equatorZ = Mathf.Sin(longitude_rads);
+                multiplier = Mathf.Cos(latitude_rads);
+                point.x = multiplier * equatorX * radius;
+                point.z = multiplier * equatorZ * radius;
+                point.y = Mathf.Sin(latitude_rads) * radius;
+                if (CanPlaceNode(RoundToNearestMinute(point)))
+                {
+                    GameObject node = Instantiate(prefab, point, Quaternion.LookRotation(point));
+                    nodes[nodeCount] = node;
+                    nodeCount++;
+                    PrintPoint(point);
+                }
+                longitude_mins += INTERVAL_MINUTES;
+            }
+            latitude_mins += INTERVAL_MINUTES;
+            //Resources.UnloadUnusedAssets();
+            //System.GC.Collect();
+        }
+        log.Flush();
+    }
+
+    private void PlaceNodesGoldenSpiral()
+    {
+        float dlongitude = Mathf.PI * (3 - Mathf.Sqrt(5));
+        float dy = 2.0f / NODE_COUNT;
+        float longitude = 0.0f;
+        float y = 1 - dy / 2.0f;
+        for (int k = 0; k < NODE_COUNT; k++)
+        {
+            float r = Mathf.Sqrt(1 - y * y);
+            float x = Mathf.Cos(longitude) * r;
+            float z = Mathf.Sin(longitude) * r;
+            Vector3 point = RoundToNearestMinute(new(x, y, z));
+
+            if (CanPlaceNode(point))
+            {
+                GameObject node = Instantiate(prefab, point, Quaternion.LookRotation(point));
+                nodes[nodeCount] = node;
+                nodeCount++;
+                PrintPoint(point);
+            } else {
+                log.Print("Nodes are too close\n");
+            }
+
+            y = y - dy;
+            longitude = longitude + dlongitude;
+        }
+        log.Print(string.Format("{0} total nodes placed\n", nodeCount));
+        log.Flush();
     }
 
     private void Update()
@@ -193,6 +283,7 @@ public class SimNodeRepulsion : MonoBehaviour
         MoveNodes();
 
     done:
+        log.Flush();
         return;
     }
 
@@ -296,6 +387,7 @@ public class SimNodeRepulsion : MonoBehaviour
                                        padRollDegs);
             log.Print(str);
         }
+        log.Flush();
     }
 
     private void MoveNodes()

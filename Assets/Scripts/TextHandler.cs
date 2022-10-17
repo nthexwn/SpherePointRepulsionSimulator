@@ -26,6 +26,11 @@ public class TextHandler
         Write(str);
     }
 
+    public void Flush()
+    {
+        writer.Flush();
+    }
+
     private void Write(string str)
     {
         writer.Write(str);
@@ -33,5 +38,7 @@ public class TextHandler
         // Re-import the file to update the reference in the editor
         //AssetDatabase.ImportAsset(path);
         //TextAsset asset = (TextAsset)Resources.Load("log");
+
+        writer.Flush();
     }
 }
